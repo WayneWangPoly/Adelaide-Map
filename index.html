@@ -33,27 +33,32 @@
     let zoneLayers = {};
     let sheetData = {};
 
-    // 2. 加载 GeoJSON（通过 AllOrigins 从 Google Drive 拉取）
-    const rawUrl = 'https://drive.google.com/uc?export=download&id=17FaPBXbCJsSYoNVi0xa3zfSg5--AvtoA';
-    const GEOJSON_URL = 'https://api.allorigins.win/raw?url=' + encodeURIComponent(rawUrl);
-    fetch(GEOJSON_URL)
-      .then(res => res.json())
-      .then(data => {
-        L.geoJSON(data, {
-          style: feature => {
-            const zone = feature.properties.zone;
-            return { color: '#000', weight: 1, fillOpacity: 0.5, fillColor: getColor(zone) };
-          },
-          onEachFeature: (feature, layer) => {
-            const z = feature.properties.zone;
-            if (!zoneLayers[z]) {
-              zoneLayers[z] = L.layerGroup().addTo(map);
-            }
-            zoneLayers[z].addLayer(layer);
-          }
-        }).addTo(map);
-      })
-      .catch(err => console.error('Failed to load GeoJSON via proxy:', err));
+    // 2. 加载 GeoJSON（通过 jsDelivr 从 GitHub LFS 拉取）
+// 请使用 GitHub Desktop + Git LFS 将大于25MB的 Suburbs_GDA2020.geojson 文件提交到仓库的 main 分支。
+// 然后在此替换为：
+// 如果文件超过 GitHub 上传限制，也可通过 Releases 上传，并使用 Releases 下载链接：
+// 1. 在 GitHub 仓库页面点击 “Releases” → “Draft a new release”
+// 2. 填写 Tag v1.0，上传您的 Suburbs_GDA2020.geojson 作为 Release Asset
+// 3. 发布后，它会生成下载链接
+const GEOJSON_URL = 'https://github.com/WayneWangPoly/Adelaide-Map/releases/download/MicroExpress/Suburbs_GDA2020.geojson';
+fetch(GEOJSON_URL)
+  .then(res => res.json())
+  .then(data => {
+    L.geoJSON(data, {
+      style: feature => {
+        const zone = feature.properties.zone;
+        return { color: '#000', weight: 1, fillOpacity: 0.5, fillColor: getColor(zone) };
+      },
+      onEachFeature: (feature, layer) => {
+        const z = feature.properties.zone;
+        if (!zoneLayers[z]) {
+          zoneLayers[z] = L.layerGroup().addTo(map);
+        }
+        zoneLayers[z].addLayer(layer);
+      }
+    }).addTo(map);
+  })
+  .catch(err => console.error('Failed to load GeoJSON via jsDelivr:', err));
 
     // 3. 使用 Google Apps Script API 获取和保存数据
     const GAS_URL = 'https://script.google.com/macros/s/1saIS-f3RcV2PbIvboZvDGXIq1EenqDmfjcMGQm30NSEAsi7ZcSUE_eUD/exec';
