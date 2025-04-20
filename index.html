@@ -34,32 +34,26 @@
     let sheetData = {};
 
     // 2. 加载 GeoJSON（通过 AllOrigins 从 Google Drive 拉取）
-const rawUrl = 'https://drive.google.com/uc?export=download&id=17FaPBXbCJsSYoNVi0xa3zfSg5--AvtoA';
-const GEOJSON_URL = 'https://api.allorigins.win/raw?url=' + encodeURIComponent(rawUrl);
-fetch(GEOJSON_URL)
-  .then(res => res.json())
-  .then(data => {
-    L.geoJSON(data, {
-      style: feature => {
-        const zone = feature.properties.zone;
-        return { color: '#000', weight: 1, fillOpacity: 0.5, fillColor: getColor(zone) };
-      },
-      onEachFeature: (feature, layer) => {
-        const z = feature.properties.zone;
-        if (!zoneLayers[z]) {
-          zoneLayers[z] = L.layerGroup().addTo(map);
-        }
-        zoneLayers[z].addLayer(layer);
-      }
-    }).addTo(map);
-  })
-  .catch(err => console.error('Failed to load GeoJSON via proxy:', err));
-        }
-        zoneLayers[z].addLayer(layer);
-      }
-    });
-  })
-  .catch(err => console.error('Failed to load GeoJSON via jsDelivr:', err));
+    const rawUrl = 'https://drive.google.com/uc?export=download&id=17FaPBXbCJsSYoNVi0xa3zfSg5--AvtoA';
+    const GEOJSON_URL = 'https://api.allorigins.win/raw?url=' + encodeURIComponent(rawUrl);
+    fetch(GEOJSON_URL)
+      .then(res => res.json())
+      .then(data => {
+        L.geoJSON(data, {
+          style: feature => {
+            const zone = feature.properties.zone;
+            return { color: '#000', weight: 1, fillOpacity: 0.5, fillColor: getColor(zone) };
+          },
+          onEachFeature: (feature, layer) => {
+            const z = feature.properties.zone;
+            if (!zoneLayers[z]) {
+              zoneLayers[z] = L.layerGroup().addTo(map);
+            }
+            zoneLayers[z].addLayer(layer);
+          }
+        }).addTo(map);
+      })
+      .catch(err => console.error('Failed to load GeoJSON via proxy:', err));
 
     // 3. 使用 Google Apps Script API 获取和保存数据
     const GAS_URL = 'https://script.google.com/macros/s/1saIS-f3RcV2PbIvboZvDGXIq1EenqDmfjcMGQm30NSEAsi7ZcSUE_eUD/exec';
@@ -110,7 +104,7 @@ fetch(GEOJSON_URL)
 
     // 随机色彩映射
     function getColor(zone) {
-      const hash = zone.split('').reduce((h,c) => h + c.charCodeAt(0), 0);
+      const hash = zone.split('').reduce((h, c) => h + c.charCodeAt(0), 0);
       const color = (hash * 1234567 % 0xFFFFFF).toString(16).padStart(6, '0');
       return '#' + color;
     }
