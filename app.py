@@ -126,5 +126,8 @@ def update_map(btns, vals):
         return [[lat - d, lon - d], [lat + d, lon + d]]
     raise dash.exceptions.PreventUpdate
 
+# Expose the WSGI callable for Gunicorn
+application = app.server
+
 if __name__ == '__main__':
     app.run(debug=True)
