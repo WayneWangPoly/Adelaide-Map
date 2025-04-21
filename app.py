@@ -1,60 +1,44 @@
 import json
-import pandas as pd
+import random
 import dash
 from dash import html, dcc
 import dash_leaflet as dl
 from dash.dependencies import Input, Output, ALL
-import os
-import random
-import warnings
+import pandas as pd
+import math
 
-# Base directory
-BASE_DIR = os.path.dirname(__file__)
-GEOJSON_PATH = os.path.join(BASE_DIR, "Suburbs_GDA2020.geojson")
-EXCEL_PATH = os.path.join(BASE_DIR, "Adelaide.xlsx")
-DRIVER_CSV = os.path.join(BASE_DIR, "Driver.csv")
-
-# Load GeoJSON
-with open(GEOJSON_PATH, 'r', encoding='utf-8') as f:
-    geojson = json.load(f)
-
-# Load region-to-postcodes mapping from Excel
-mapping_df = pd.read_excel(EXCEL_PATH, sheet_name=0, dtype=str)
-mapping_df.columns = mapping_df.columns.str.strip().str.lower()
-if 'zone' not in mapping_df.columns or 'postcode' not in mapping_df.columns:
-    raise KeyError("Adelaide.xlsx must contain 'zone' and 'postcode' columns")
+# 1. 读取数据
+mapper = pd.read_excel('Adelaide.xlsx', dtype=str)
+mapper.columns = mapper.columns.str.strip().str.lower()
 postcode_zone = {}
-for _, row in mapping_df.iterrows():
-    region = row['zone']
+for _, row in mapper.iterrows():
     for pc in str(row['postcode']).split(','):
-        pc = pc.strip()
-        if pc:
-            postcode_zone[pc] = region
+        postcode_zone[pc.strip()] = row['zone']
 
-# Load driver assignments: region -> responsible
-driver_df = pd.read_csv(DRIVER_CSV, dtype=str)
+driver_df = pd.read_csv('Driver.csv', dtype=str)
 driver_df.columns = driver_df.columns.str.strip().str.lower()
-if 'zone' not in driver_df.columns or 'responsible' not in driver_df.columns:
-    raise KeyError("Driver.csv must contain 'zone' and 'responsible' columns")
-# Ensure driver entries for all regions
-all_regions = sorted(mapping_df['zone'].unique())
-zone_driver = {region: "" for region in all_regions}
+all_zones = sorted(mapper['zone'].unique())
+zone_driver = {z: '' for z in all_zones}
 for _, row in driver_df.iterrows():
     zone_driver[row['zone']] = row['responsible']
 
-# Assign region property and colors to features
-zone_colors = {r: f"#{random.randint(0, 0xFFFFFF):06x}" for r in all_regions}
-for feat in geojson['features']:
-    pc = str(feat['properties'].get('postcode')).strip()
-    feat['properties']['zone'] = postcode_zone.get(pc, '未知区域')
+# 2. 加载 GeoJSON 并构建 Polygon 图层
+with open('Suburbs_GDA2020.geojson', 'r', encoding='utf-8') as f:
+    geo = json.load(f)
 
-# Create polygon layers per feature
+# 颜色映射
+tmp_colors = {z: f"#{random.randint(0,0xFFFFFF):06x}" for z in all_zones}
+
+# 构建多边形和区域多边形列表
 polygons = []
-for feat in geojson['features']:
+region_polygons = {z: [] for z in all_zones}
+for feat in geo['features']:
+    pc = str(feat['properties'].get('postcode')).strip()
+    region = postcode_zone.get(pc)
+    if not region:
+        continue
     coords = feat['geometry']['coordinates']
-    region = feat['properties']['zone']
-    color = zone_colors.get(region, '#CCCCCC')
-    rings = [coords] if feat['geometry']['type'] == 'Polygon' else coords
+    rings = [coords] if feat['geometry']['type']=='Polygon' else coords
     for ring in rings:
         pts = ring[0] if isinstance(ring[0][0], list) else ring
         positions = [(lat, lon) for lon, lat in pts]
@@ -62,104 +46,90 @@ for feat in geojson['features']:
             dl.Polygon(
                 positions=positions,
                 color='black', weight=1,
-                fill=True, fillColor=color, fillOpacity=0.5
+                fill=True, fillColor=tmp_colors[region], fillOpacity=0.5
+            )
+        )
+        region_polygons[region].append(positions)
+
+# 计算最大多边形质心
+markers = []
+def polygon_centroid(coords):
+    # coords list of (lat, lon)
+    pts = [(y, x) for x, y in coords]
+    area = 0; Cx = 0; Cy = 0; n = len(pts)
+    for i in range(n):
+        x0, y0 = pts[i]
+        x1, y1 = pts[(i+1) % n]
+        cross = x0*y1 - x1*y0
+        area += cross; Cx += (x0+x1)*cross; Cy += (y0+y1)*cross
+    area /= 2
+    if abs(area) < 1e-9:
+        return (sum(y for x,y in pts)/n, sum(x for x,y in pts)/n), 0
+    Cx /= 6*area; Cy /= 6*area
+    return (Cy, Cx), abs(area)
+
+for region, poly_list in region_polygons.items():
+    best = None; best_area = -1
+    for coords in poly_list:
+        (latc, lonc), area = polygon_centroid(coords)
+        if area > best_area:
+            best_area = area; best = (latc, lonc)
+    if best:
+        markers.append(
+            dl.Marker(
+                position=best,
+                children=[dl.Tooltip(region, permanent=True, direction='center')],
+                interactive=False
             )
         )
 
-# Compute region centers from features
-region_centers = {}
-# accumulate all lat/lon per region
-accum = {r: [] for r in all_regions}
-for feat in geojson['features']:
-    region = feat['properties']['zone']
-    coords = feat['geometry']['coordinates']
-    rings = [coords] if feat['geometry']['type'] == 'Polygon' else coords
-    for ring in rings:
-        pts = ring[0] if isinstance(ring[0][0], list) else ring
-        for lon, lat in pts:
-            accum.setdefault(region, []).append((lat, lon))
-# average
-for region, pts in accum.items():
-    if pts:
-        lats, lons = zip(*pts)
-        region_centers[region] = [sum(lats)/len(lats), sum(lons)/len(lons)]
-
-# Create markers for region labels
-markers = []
-for region, center in region_centers.items():
-    markers.append(
-        dl.Marker(
-            position=center,
-            children=[dl.Tooltip(region, permanent=True, direction='center')],
-            interactive=False
-        )
-    )
-
-# Initialize Dash
-app = dash.Dash(__name__)
-server = app.server
-
-# Sidebar: region buttons and input for driver ID
+# 3. 构建侧边栏
 sidebar = html.Div([
-    html.H2("配送区域负责人", style={'marginTop':'0'}),
+    html.H2('配送区域负责人'),
     *[
         html.Div([
-            html.Button(region, id={'type':'zone-btn','index':region}, n_clicks=0, style={'marginRight':'5px'}),
-            dcc.Input(id={'type':'zone-input','index':region}, type='text', value=zone_driver[region], style={'flex':1})
+            html.Button(z, id={'type':'btn','index':z}, n_clicks=0, style={'marginRight':'5px'}),
+            dcc.Input(id={'type':'input','index':z}, type='text', value=zone_driver[z], style={'flex':1})
         ], style={'display':'flex','alignItems':'center','marginBottom':'5px'})
-        for region in all_regions
+        for z in all_zones
     ]
-], style={'width':'20%','padding':'10px','backgroundColor':'#f8f9fa','overflowY':'auto','height':'100vh'})
+], style={'width':'25%','padding':'10px','backgroundColor':'#f0f0f0','height':'100vh','overflowY':'auto'})
 
-# Layout: map and sidebar
-app.layout = html.Div([
-    dl.Map([dl.TileLayer()] + polygons + markers,
-           id='map', center=[-34.9285,138.6007], zoom=10,
-           style={'flex':1,'height':'100vh'}),
+# 4. 初始化 Dash
+dapp = dash.Dash(__name__)
+
+dapp.layout = html.Div([
+    dl.Map(children=[dl.TileLayer()] + polygons + markers,
+           center=[-34.9285,138.6007], zoom=10,
+           style={'flex':1,'height':'100vh'}, id='map'),
     sidebar
-], style={'display':'flex','flexDirection':'row','margin':0,'padding':0})
+], style={'display':'flex','margin':0,'padding':0})
 
-# Helper to compute bounds for a region
-def get_bounds(region):
-    pts = []
-    for feat in geojson['features']:
-        if feat['properties']['zone'] == region:
-            coords = feat['geometry']['coordinates']
-            rings = [coords] if feat['geometry']['type']=='Polygon' else coords
-            for ring in rings:
-                pts_list = ring[0] if isinstance(ring[0][0], list) else ring
-                for lon, lat in pts_list:
-                    pts.append((lat, lon))
-    if not pts:
-        return None
-    lats, lons = zip(*pts)
-    return [[min(lats), min(lons)], [max(lats), max(lons)]]
-
-# Callback: zoom and save driver ID on input change
-@app.callback(
+# 5. 回调：缩放 & 保存
+@dapp.callback(
     Output('map','bounds'),
-    [Input({'type':'zone-btn','index':ALL},'n_clicks'),
-     Input({'type':'zone-input','index':ALL},'value')]
+    [Input({'type':'btn','index':ALL},'n_clicks'),
+     Input({'type':'input','index':ALL},'value')]
 )
-def update_map(btns, values):
+def update_map(btns, vals):
     ctx = dash.callback_context
     if not ctx.triggered:
         raise dash.exceptions.PreventUpdate
-    comp_id = ctx.triggered[0]['prop_id'].split('.')[0]
-    region = json.loads(comp_id)['index']
-    prop = ctx.triggered[0]['prop_id'].split('.')[1]
-    # if input changed, save to CSV
+    comp, prop = ctx.triggered[0]['prop_id'].split('.')
+    region = json.loads(comp)['index']
     if prop == 'value':
         new_val = ctx.triggered[0]['value']
-        df = pd.read_csv(DRIVER_CSV, dtype=str)
+        df = pd.read_csv('Driver.csv', dtype=str)
         df.columns = df.columns.str.strip().str.lower()
-        df.loc[df['zone'] == region, 'responsible'] = new_val
-        df.to_csv(DRIVER_CSV, index=False, encoding='utf-8-sig')
-    # zoom
-    bounds = get_bounds(region)
-    if bounds:
-        return bounds
+        df.loc[df['zone']==region, 'responsible'] = new_val
+        df.to_csv('Driver.csv', index=False, encoding='utf-8-sig')
+    # bounds
+    poly_list = region_polygons.get(region, [])
+    all_pts = [pt for coords in poly_list for pt in coords]
+    if all_pts:
+        lats, lons = zip(*all_pts)
+        return [[min(lats), min(lons)], [max(lats), max(lons)]]
     raise dash.exceptions.PreventUpdate
 
-if __name__ == '__main__':
-    app.run(debug=True)
+if __name__=='__main__':
+    dapp.run(debug=True)
